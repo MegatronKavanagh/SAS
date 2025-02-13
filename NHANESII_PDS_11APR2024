@@ -1,0 +1,3447 @@
+*Portfolio Diet Score and CVD Project - covariate code;
+
+%LET home = C:\Users\Meg\OneDrive - University of Toronto\NHANES\DATA FILES;
+
+LIBNAME nhanes "C:\Users\Meg\OneDrive - University of Toronto\NHANES\DATA FILES";
+
+*******************************************
+*              Import datafile            *
+*******************************************; 
+proc import 
+out=NHANESIIIanalysisfile_raw  
+datafile = "&home\NHANESIIIAdultdemoYouthexamDR_mortalitymerged_labHEI_IFFSECcodebook_EXAM2_Portfolio_20NOV2023.dta"
+DBMS= dta replace;
+run; *33,994 observations;
+
+*******************************************
+*             preparing dataset           *
+*******************************************; 
+DATA  NHANESIIIanalysisfile;*cleaning;
+	set NHANESIIIanalysisfile_raw;
+	if DRPNSODI = 88888  THEN  DRPNSODI = .;
+	if DRPNKCAL = 88888  THEN  DRPNKCAL = .;
+	if EDUCATION = 88  THEN  EDUCATION = .;
+	if EDUCATION = 99  THEN  DRPNSODI = .;
+	if HAD1 = 8  THEN  HAD1 = .;
+	if HAD1 = 9  THEN  HAD1 = .;
+	if HAE2 = 8  THEN  HAE2 = .;
+	if HAE2 = 9 THEN  HAE2 = .;
+	if HAE7 = 8  THEN  HAE7 = .;
+	if HAE7 = 9  THEN  HAE7 = .;
+	if LCP = 888 THEN LCP =.; 
+	if LCPSI= 8888 THEN LCPSI=.;
+	if CRP = 88888 THEN CRP=.; 
+	if TGP = 8888 THEN TGP=.;
+	if DMPPIR= 888888 THEN DMPPIR=.;
+	if HDP = 888 THEN  HDP=.;
+	if TCP = 888 THEN  TCP=.; 
+	if BMPBMI = 8888 THEN BMPBMI=.;
+	if HEISCORE = 88888 THEN HEISCORE=.;
+run;
+
+DATA  NHANESIIIanalysisfile;*dropping those ineligible for analysis;
+	set NHANESIIIanalysisfile;
+	if HSAGEIR < 20 then delete; *younger than 20;
+	if MAPF12R = 1 then delete; *pregnant at baseline;;
+run; *18537 observations;
+
+DATA  NHANESIIIanalysisfile;*dropping if inegliible for mortality FU or 24hr recall;
+	set NHANESIIIanalysisfile;
+	if eligstat=2 OR eligstat=3 then delete; *drop those not eligible for mortality followup;
+	if DRPSTAT=. then delete; *missing 24 hour diet recall;
+	if DRPSTAT IN (2, 3, 4, 5, 8)  then delete; *
+	2 //incomplete decided to remove these as there are very few of them (total 69)
+	3 //unreliable 
+	4 //interview lost due to computer malfunction of file transfer problem
+	5 //breastfeeding infant or child
+	8 //blank but applicable; 
+run; * 15687 observation;
+
+DATA  NHANESIIIanalysisfile;*dropping low BMI ;
+	set NHANESIIIanalysisfile;
+	if BMPBMI < 18.5 then delete; *BMI below 18.5 (287 dropped);
+run; *  15318 observations 
+
+
+
+*******************************************
+*            CODING COVAIRATES            *
+*******************************************; 
+* last drop list to baseline step will be missing covariates, if over 5% we should do MI;
+
+/* 1 HSAGEIR 
+   2 HSSEX 
+   3 DMARETHN */
+
+*********************************                                                                                    	                                                                            
+**        4. SMOKING           **                                                                                                                                        	  
+*********************************;
+/* HAR1 HAR3                                                                                                                                                                   
+/*HAR1 - Have you smoked at least 100 cigarettes during your entire life? */                                                                                                        
+/*9799  1 Yes*/                                                                                                                              	                                    
+/*10235 2 No (HAR14)*/                                                                                                                                                              
+/*16	8 Blank but applicable*/ 	                                                                                                                                                
+                                                                                                                                                                                     
+/*HAR3 - Do you smoke cigarettes now? */                                                                                                                                            
+/*4990  1 Yes*/                                                                                                                                                                     
+/*4807  2 No (HAR11)*/                                                   	                                                                                                        
+/*18	8 Blank but applicable*/                                                                                                                   	                              
+/*10235 Blank*/   
+DATA  NHANESIIIanalysisfile; *making covariates;
+set NHANESIIIanalysisfile; 
+SMOKER=.; /* 1=No 2=YES from previous variables*/                                                                                     	                                                                
+		IF HAR1 = 2 THEN SMOKER=3; * NEVER=3;                                                                                                                                                
+		ELSE IF HAR1 = 1 AND HAR3 = 1 THEN SMOKER=1; * CURRENT=1;                                                                                                                             
+		ELSE IF HAR1 = 1 AND HAR3 = 2 THEN SMOKER=2; * FORMER=2;   
+
+     
+*********************************                                                                                    	                                                                            
+**    5. PHYSICAL ACTIVITY     **                                                                                                                                        	  
+*********************************;          
+                                                	                                                                                            
+/*ref: 3 to <6 as mod; and >=6 as vig; Diabetes Research and Clinical Practice, Volume 66, Issue 2,                                                            	                  
+ November 2004, Pages 203-215 (impact factor only 2.1:-( )*/                                                                                                                        
+/*same was mentioned in this paper: Hypertension. 2003;41:1273-1280 (impact factor 6.6, a lot                                                                                       
+ better!!) */                                                                                                                                                                      
+/*with a "huge" assumption that each PHYSACT takes for about 30 minutes, we could come up with                                                                                      
+ something like */                                                                                                                                       	                        
+/*1.	5 times mod PA per week (roughly equivalent to ">= 150 min/wk moderate intensity") or */                                                                                    
+/*2.	2.5 times vig per wk (roughly equivalent to ">= 75 min/wk vigorous intensity") or*/                                                                                         
+/*3.	5 times (vig + mod) per week (roughly equivalent to "combination") ‘¯O I‘¯Om not quite sure                        	                                                          
+        about this though‘¯O*/     
+IF HAT1S IN (8888, 9999) THEN HAT1S=.;                                               	                                                                                            
+IF HAT3S IN (8888, 9999) THEN HAT3S=.;                                                                                                                         	                  
+IF HAT5S IN (8888) THEN HAT5S=.;                                                                                                                                                    
+IF HAT7S IN (8888) THEN HAT7S=.;                   	                                                                                                                              
+IF HAT9S IN (8888) THEN HAT9S=.;                                                                                             	                                                    
+IF HAT11S IN (8888) THEN HAT11S=.;                                                                                                                                                  
+IF HAT13S IN (8888) THEN HAT13S=.;                                                                                                                                                  
+IF HAT15S IN (8888, 9999) THEN HAT15S=.;                                                   	                                                                                      
+IF HAT17S IN (8888) THEN HAT17S=.;                                                                                                                                   	            
+IF HAT20S=8888 THEN HAT20S=.;                                                                                                                                                       
+IF HAT22S=8888 THEN HAT22S=.;                            	                                                                                                                        
+IF HAT24S=8888 THEN HAT24S=.;                                                                                                      	                                              
+IF HAT26S=8888 THEN HAT26S=.;                                                                                                                                                       
+IF HAT27 IN (8, 9) THEN HAT27 =.;                                                                                                                                                   
+IF HAT30 IN (8, 9) /*=8888*/ THEN HAT30 =.;                                                      	                                                                                
+                                                                                                                                                                                     
+/* THESE CONVERT THE 'NO' ANSWERS TO SPECIFIC PHYSICAL                                                                                                                              
+   ACTIVITIES AND MET VALUES TO ZERO FOR EASIER SUMMARY        	                                                                                                                  
+   PHYSICAL ACTIVITY COMPUTATION  */                                                                                                     	                                        
+                                                                                                                                                                                     
+IF HAT11S=0 THEN  HAT1MET=0; 	                                                                                                                                                    
+IF   HAT2=2 THEN	HAT3S=0;                                                                                                                                                        
+IF   HAT2=2 THEN  HAT2MET=0;                                          	                                                                                                           
+IF   HAT4=2 THEN	HAT5S=0;                                                                                                                    	                                 
+IF   HAT4=2 THEN  HAT4MET=0;                                                                                                                                                        
+IF   HAT6=2 THEN	HAT7S=0;        	                                                                                                                                             
+IF   HAT6=2 THEN  HAT6MET=0;                                                                                  	                                                                   
+IF   HAT8=2 THEN	HAT9S=0;                                                                                                                                                        
+IF   HAT8=2 THEN  HAT8MET=0;                                                                                                                                                        
+IF  HAT10=2 THEN   HAT11S=0;                                                	                                                                                                     
+IF  HAT10=2 THEN HAT10MET=0;                                                                                                                          	                           
+IF  HAT12=2 THEN   HAT13S=0;                                                                                                                                                        
+IF  HAT12=2 THEN HAT12MET=0;              	                                                                                                                                       
+IF  HAT14=2 THEN   HAT15S=0;                                                                                        	                                                             
+IF  HAT14=2 THEN HAT14MET=0;                                                                                                                                                        
+IF  HAT16=2 THEN   HAT17S=0;                                                                                                                                                        
+IF  HAT16=2 THEN HAT16MET=0;                                                      	                                                                                               
+                                                                                                                                                                                     
+IF  HAT18=2 THEN DO;                                                                                                                                                                
+HAT20S=0;                                       	                                                                                                                                 
+HAT22S=0;                                                                                                                 	                                                       
+HAT24S=0;                                                                                                                                                                           
+HAT26S=0;     	                                                                                                                                                                   
+HAT19MET=0;                                                                             	                                                                                         
+HAT21MET=0;                                                                                                                                                       	               
+HAT23MET=0;                                                                                                                                                                         
+HAT25MET=0; END;                                      	                                                                                                                           
+                                                                                                                                                                                     
+IF HAT19CD =88888 THEN HAT19CD =0;                                                                                                                                                  
+IF HAT19CD =	2 THEN HAT19MET=0;                                                                                                                                                  
+IF HAT19CD =	2 THEN HAT20S  =0;                                                                                                                                                  
+IF HAT19MET= 8888 THEN HAT19MET=.;                                    	                                                                                                           
+                                                                                                                                                                                     
+/* PHYSICAL ACTIVITY COMPUTATION BELOW   */                                                                                                                                         
+                                                                                                                                                                                     
+/* DISCOUNTS ACTIVITIES LESS THAN 3.5 METS LIKE VIOLIN,                                                       	                                                                   
+KNITTING, BOWLING, MOTOR-SCOOTER, ETC.  */                                                                                                                                          
+                                                                                                                                                                                     
+IF HAT19MET LT 3 THEN HAT20S=0; IF HAT19MET LT 3 THEN HAT19MET=0;  /*less than */         	                                                                                                     
+IF HAT21MET LT 3 THEN HAT22S=0; IF HAT21MET LT 3 THEN HAT21MET=0;                                                                                     	                           
+IF HAT23MET LT 3 THEN HAT24S=0; IF HAT23MET LT 3 THEN HAT23MET=0;                                                                                                                   
+IF HAT25MET LT 3 THEN HAT26S=0; IF HAT25MET LT 3 THEN HAT25MET=0;                                                                                                                   
+                                                                                                                                                                                     
+ HAT1Sm=.; if  HAT1MET>= 3 then HAT1Sm=HAT1S;   /*Past mo,how often walk mile without stop 	*/                                                                                   
+ HAT3Sm=.; if  HAT2MET>= 3 then HAT3Sm=HAT3S;   /*Past month, how often did you jog or run 	*/                                                                                   
+ HAT5Sm=.; if  HAT4MET>= 3 then HAT5Sm=HAT5S;   /*Past mo, how often ride bike/exer bike   	*/                                                                                   
+ HAT7Sm=.; if  HAT6MET>= 3 then HAT7Sm=HAT7S;   /*Past month, how often did you swim       	*/                                                           	                     
+ HAT9Sm=.; if  HAT8MET>= 3 then HAT9Sm=HAT9S;   /*Past mo, how often did aerobics/dancing  	*/                                                                                   
+HAT11Sm=.; if HAT10MET>= 3 then HAT11Sm=HAT11S; /*Past month, how often did other dancing  	*/                                                                                   
+HAT13Sm=.; if HAT12MET>= 3 then HAT13Sm=HAT13S; /*Past mo, how often did calisthenics/exer 	*/                         	                                                       
+HAT15Sm=.; if HAT14MET>= 3 then HAT15Sm=HAT15S; /*Past mo, how often did garden/yard work  	*/                                                                                   
+HAT17Sm=.; if HAT16MET>= 3 then HAT17Sm=HAT17S; /*Past mo, how often did you lift weights  	*/                                                                                   
+HAT20Sm=.; if HAT19MET>= 3 then HAT20Sm=HAT20S; /*Past mo, how often did other activity 	   */                                                                                   
+HAT22Sm=.; if HAT21MET>= 3 then HAT22Sm=HAT22S; /*Past mo, how often did other activity 2  	*/                                                                 	               
+HAT24Sm=.; if HAT23MET>= 3 then HAT24Sm=HAT24S; /*Past mo, how often did other activity 3  	*/                                                                                   
+HAT26Sm=.; if HAT25MET>= 3 then HAT26Sm=HAT26S; /*Past mo, how often did other activity 4  	*/                                                                                   
+                                                                                                                                                                                     
+/* TOTDAYS IS THE TOTAL NUMBER OF DAYS PER MONTH IN WHICH A                                                                                                                         
+      PERSON DID ANY TYPE OF PHYSICAL ACTIVITY  */                                                                                                                                  
+                                                                                                                                                                                     
+/*this is a). moderate alone, or b). mod+vig */                       	                                                                                                           
+TOTDAYSm=SUM(HAT1Sm,  HAT3Sm,  HAT5Sm,  HAT7Sm,  HAT9Sm, HAT11Sm, HAT13Sm, HAT15Sm,                                                             	                                 
+            HAT17Sm, HAT20Sm, HAT22Sm, HAT24Sm, HAT26Sm);                                                                                                                           
+                                                                                                                                                                                     
+ACTDAYSm_PW  =   TOTDAYSm/(30.4/7);                                                                           	                                                                   
+                                                                                                                                                                                     
+/* PHYSICAL ACTIVITIES - Vig act */                                                                                                                                                 
+/*HAT1MET   	Walking activity -intensity rating       	*/             	                                                                                                     
+/*HAT2MET   	Jog or run activity -intensity rating    	*/                                                                                       	                           
+/*HAT4MET   	Bicycle activity -intensity rating       	*/                                                                                                                     
+/*HAT6MET   	Swim activity -intensity rating          	*/                                                                                                                     
+/*HAT8MET   	Aerobics activity -intensity rating      	*/                                                     	                                                             
+/*HAT10MET  	Other dancing activity -intensity rating 	*/                                                                                                                     
+/*HAT12MET      Calisthenics activity -intensity rating  	*/                                                                                                                     
+/*HAT14MET  	Garden/yard activity -intensity rating   	*/                   	                                                                                               
+/*HAT16MET  	Lift weights activity -intensity rating  	*/                                                                                             	                     
+/*HAT19MET  	Other activity -intensity rating         	*/                                                                                                                     
+/*HAT21MET  	Other activity 2 -intensity rating           */                                                                                                                     
+/*HAT23MET  	Other activity 3 -intensity rating       	*/                                                           	                                                       
+/*HAT25MET  	Other activity 4 -intensity rating       	*/                                                                                                                     
+ HAT1Sv=.; if  HAT1MET>= 6 then HAT1Sv=HAT1S;   /*Past mo,how often walk mile without stop 	*/                                                                                   
+ HAT3Sv=.; if  HAT2MET>= 6 then HAT3Sv=HAT3S;   /*Past month, how often did you jog or run     */                                                                                   
+ HAT5Sv=.; if  HAT4MET>= 6 then HAT5Sv=HAT5S;   /*Past mo, how often ride bike/exer bike   	*/                                                                 	               
+ HAT7Sv=.; if  HAT6MET>= 6 then HAT7Sv=HAT7S;   /*Past month, how often did you swim       	*/                                                                                   
+ HAT9Sv=.; if  HAT8MET>= 6 then HAT9Sv=HAT9S;   /*Past mo, how often did aerobics/dancing  	*/                                                                                   
+HAT11Sv=.; if HAT10MET>= 6 then HAT11Sv=HAT11S; /*Past month, how often did other dancing  	*/                               	                                                 
+HAT13Sv=.; if HAT12MET>= 6 then HAT13Sv=HAT13S; /*Past mo, how often did calisthenics/exer 	*/                                                                                   
+HAT15Sv=.; if HAT14MET>= 6 then HAT15Sv=HAT15S; /*Past mo, how often did garden/yard work  	*/                                                                                   
+HAT17Sv=.; if HAT16MET>= 6 then HAT17Sv=HAT17S; /*Past mo, how often did you lift weights  	*/                                                                                   
+HAT20Sv=.; if HAT19MET>= 6 then HAT20Sv=HAT20S; /*Past mo, how often did other activity    	*/                                                                                   
+HAT22Sv=.; if HAT21MET>= 6 then HAT22Sv=HAT22S; /*Past mo, how often did other activity 2  	*/                                               	                                 
+HAT24Sv=.; if HAT23MET>= 6 then HAT24Sv=HAT24S; /*Past mo, how often did other activity 3  	*/                                                                                   
+HAT26Sv=.; if HAT25MET>= 6 then HAT26Sv=HAT26S; /*Past mo, how often did other activity 4  	*/                                                                                   
+                                                                                                                                                                                     
+TOTDAYSv=SUM(HAT1Sv,  HAT3Sv,  HAT5Sv,  HAT7Sv,  HAT9Sv, HAT11Sv, HAT13Sv, HAT15Sv,                                                                                                 
+            HAT17Sv, HAT20Sv, HAT22Sv, HAT24Sv, HAT26Sv);                                                                                                                           
+                                                                                                                                                                                     
+ACTDAYSv_PW  =   TOTDAYSv/(30.4/7);                                                                                                                   	                           
+                                                                                                                                                                                     
+if HAT1S=0 and HAT2=2 and HAT4=2 and HAT6=2 and HAT8=2 and HAT10=2 and HAT12=2 and HAT14=2                                                                                          
+ and HAT16=2 and HAT18=2 then ACTDAYSm_PW=0;                                                                        	                                                             
+                                                                                                                                                                                     
+if HAT1S=0 and HAT2=2 and HAT4=2 and HAT6=2 and HAT8=2 and HAT10=2 and HAT12=2 and HAT14=2                                                                                          
+ and HAT16=2 and HAT18=2 then ACTDAYSv_PW=0;                                      	                                                                                               
+                                                                                                                                                                                     
+/*mod, or mod+vig*/                                                                                                                                                                 
+ACTCATm=.;                                      	                                                                                                                                 
+         IF 0<=ACTDAYSm_PW<5 THEN ACTCATm=2; * Less than 5 per week;                                                      	                                                       
+ELSE IF  	ACTDAYSm_PW>=5 THEN ACTCATm=1; * 5 or more per week;                                                                                                                   
+                                                                                                                                                                                     
+/*vig only*/                                                                            	                                                                                         
+ACTCATv=.;                                                                                                                                                        	               
+         IF 0<=ACTDAYSv_PW<3 THEN ACTCATv=2; * Less than 2.5 per week;                                                                                                              
+ELSE IF  	ACTDAYSv_PW>=3 THEN ACTCATv=1; * 2.5 or more per week;                                                                                                                 
+                                                                                                                                                                                     
+/*mod or vig combinations*/                                                                                                                                                         
+/*ACTCATc=0;        	                                                                                                                                                             
+         IF ((3 <= ACTDAYSm_PW <  5) AND ACTDAYSv_PW=2)                                                                                                                             
+         OR (ACTDAYSm_PW=4 AND ACTDAYSv_PW=1) THEN ACTCATc=1; * moderate 3-4 time+vig=2 or mod=4+vig=1;                                                                             
+*ELSE IF  	ACTCATc=2; * others;*/                                                                                                            	                                 
+                                                                                                                                                                                     
+/*overall*/                         	                                                                                                                                             
+actcat=.;                                                                                                     	                                                                   
+IF ACTCATm=1  or ACTCATv=1 /*or ACTCATc*/ THEN ACTCAT=1; * Active: mod >=5 or (mod+vig) >=5 or vig >=2.5 per week;                                                                  
+ELSE IF ACTCATm=2 or/*and*/ ACTCATv=2 THEN ACTCAT=2; * Inactive;                                                                                                                    
+                                                                                                                                                                                     
+if HAT1S=. and   HAT3S=. and   HAT5S=. and   HAT7S=. and   HAT9S=. and  HAT11S=. and  HAT13S=.                                                        	                           
+and  HAT15S=. and HAT17S=. and  HAT20S=. and  HAT22S=. and  HAT24S=. and  HAT26S=. then ACTCAT=.;                                                                                   
+                                                                                                                                                                                     
+ACT=ACTCAT; if ACTCAT=2 then ACT=0; /* 1=Active  0=Inactive */                                                      	                                                             
+                                                                                                                                                                                     
+                                                                                                                                                                                    
+if ACTDAYSv_PW>=3 or ACTDAYSm_PW>=5 then PAACTI=1;  /* most active */                                                                                                                                
+else if 0<ACTDAYSv_PW<3 or 0<ACTDAYSm_PW<5 then PAACTI=2;  /* moderate */                                                                                                                         
+else if ACTDAYSm_PW=0 and ACTDAYSv_PW=0 then PAACTI=3; /* inactive */
+
+*********************************                                                                                    	                                                                            
+**        6. EDUCATION         **                                                                                                                                        	  
+*********************************;
+                                                                                                                                                                
+/*HFA8R - What is the highest grade or year of regular school completed?? */                                                                                                        
+/*519  00 Never attended or kindergarten only
+ 19308 01-17
+ 125   88 Blank but applicable
+ 98    99 Don't know   */                                                                                                                                              
+EDUCATION=.;                                                                                     	                                                                
+	IF HFA8R < 12 THEN EDUCATION=1; * <12 years=1;                                                                                                                                                
+		ELSE IF HFA8R = 12 THEN EDUCATION=2; * 12 years=2;                                                                                                                             
+		ELSE IF HFA8R = >12 THEN EDUCATION=3; * >12 years=3;  
+		
+*********************************                                                                                    	                                                                            
+**   6. POVERTY INCOME RATIO    **                                                                                                                                        	  
+*********************************;
+/* DMPPIR = PIR
+"NOTE:	Status was defined by using the poverty income ratio (PIR), 
+ 		index calculated by dividing family ncome by a poverty threshold specific family size" 
+ 		A poverty-income ratio below 1 indicates that the family is below the poverty threshold
+ 		PIR coded by three levels: < = 1.3 (low), >1.3ñ3.5 (middle), and >3.5 (high) (groups used by CDC)
+*/
+PIR=.; 
+ 	IF DMPPIR<1.2999 THEN PIR=1; *low;
+ 	 	ELSE IF 1.3=<DMPPIR<3.4999 THEN PIR=2; *middle;
+ 	 	ELSE IF DMPPIR>=3.5 THEN PIR=3; *high;
+
+
+
+*********************************                                                                                    	                                                                            
+**   7. DIABETES (baseline)    **                                                                                                                                        	  
+*********************************                                                                                                                                                                 
+/*HAD1 - Have you ever been told by a doctor that you have diabetes or sugar diabetes? Coded 2 if borderline */                                                                                                        
+/*1614 1 Yes
+ 18410 2 No 
+     3 8 Blank but applicable
+    23 9 Don't know    
+Included Hba1c to capture unknown/undiagnosed T2Ds
+GHP: Glycated hemoglobin (HbA1c) %
+NOTE: did not take plasma glucose as not all were fasting (only subset of 7,385 were)
+ */;
+
+ 	IF GHP=8888 THEN GHP=.; /*            *missing A1c;                                                                                                                               
+ 		ELSE IF 0<GHP<5.7 THEN A1C3C=1;          *A1c <5.7% = Ideal;                                                                                      
+ 		ELSE IF 5.7<=GHP<6.5 THEN A1C3C=2;  *5.7% <=A1c <6.5% = Intermediate;                                                                           
+ 		ELSE IF GHP>=6.5 THEN A1C3C=3;      *A1c >=6.5% = Poor;                                                                                       
+ 		ELSE A1C3C=4;                        *missing A1c;                                                                                        
+                                                                                                                                                                                                                                                                                                                       
+ 	IF HAD1=2 THEN T2D=0;*Diabetes = no; 
+ 		ELSE IF HAD1=1 OR A1C3C=3 THEN T2D=1; *Diagnosed or A1c: Diabetes = yes;                                                 
+ 		ELSE IF 1<=A1C3C<=2 THEN T2D=0; *Diabetes = no;                                                                                                                                          
+ 		ELSE T2D=.;                                                                                                                                             
+*/
+
+/*simple T2D*/ 
+
+ 	IF HAD1=2 THEN T2D=0;*Diabetes = no; 
+ 		ELSE IF HAD1=1 THEN T2D=1; *Diagnosed or A1c: Diabetes = yes;                                                                                                                                                                                        
+ 		ELSE T2D=.;   *Response "don't know" was categorized as missing;                                                                                                                                            
+
+
+
+*******************************
+**  Personal History of CVD  **                                                                                                                                               	  
+*******************************;                                                                                                                                                                   
+/*INCLUDES: Stroke, Congestive Heart failure, heart attack  
+** HAC1D  HAC1C HAF10    
+
+HAC1D Has a doctor ever told you that you had a stroke?
+   649 1 Yes
+ 19393 2 No 
+     1 8 Blank but applicable
+     7 9 Don't know 
+
+ HAC1C Has a doctor ever told you that you had congestive heart failure?
+   757 1 Yes 
+ 19265 2 No 
+     1 8 Blank but applicable
+    27 9 Don't know
+
+HAF10 Has a doctor ever told you that you had a heart attack?
+   938 1 Yes
+ 18823 2 No 
+   286 8 Blank but applicable
+     3 9 Don't know*/; 
+ 
+CVD=0; /* 0=No 1=YES from previous variables*/                                                                                     	                                                                
+		IF HAC1D = 2 AND HAC1C =2 AND HAF10=2 THEN CVD=0; * No=0; 
+		ELSE IF HAC1D = 1 OR HAC1C =1 OR HAF10=1 THEN CVD=1; * Yes=1; 
+*NOTE: only use CVD if we decide to include those with CVD at baseline; 
+
+********************************                                                                                     	                                                                            
+**    8.FAMILY HISTORY CVD    **
+********************************;
+
+******Familiar risk of CVD (actual data is Heart Attack FH)*********;                                                                                                              
+                                                                                                                                                                                     
+/***** Heart Attack FH definition *****/                                                                                      
+      HA_MOM = (HAC5B3  EQ 1); *1st;                                                                                                                                                 
+      HA_DAD = (HAC5B4  EQ 1); *1st;                                                                                                                                                
+      HA_SIS = (HAC5B5  EQ 1); *1st;                                                                                                                                                 
+      HA_BRO = (HAC5B6  EQ 1); *1st;                                                                                                                                                 
+      HA_SON = (HAC5B10 EQ 1); *1st;                                                                                                                                                
+      HA_DTR = (HAC5B11 EQ 1); *1st;                                                                                                                                                
+      HA_GMR = (HAC5B1  EQ 1); *2nd;                                                                                                                                                 
+      HA_GFR = (HAC5B2  EQ 1); *2nd;                                                                                                                                                 
+      HA_AUN = (HAC5B7  EQ 1); *2nd;                                                                                                                                                
+      HA_UNC = (HAC5B8  EQ 1); *2nd;                                                                                                                                                 
+      HA_CSN = (HAC5B9  EQ 1); *3rd;                                                                                                                                                 
+      HA_OTH = (HAC5B12 EQ 1);                                                                                                                                                      
+sum1st_ha=SUM(HA_MOM, HA_DAD, HA_SIS, HA_BRO, HA_SON, HA_DTR);                                                                                                                      
+sum2nd_ha=SUM(HA_GMR, HA_GFR, HA_AUN, HA_UNC);                                                                                                                                       
+                                                                                                                                                                                     
+FCVD=.;                                                                                                                                                                             
+IF HAC4B in (1,2,8) then do; * Relatives had heart attack before age 50 ;                                                                                                           
+   * HIGH FAMILY HISTORY RISK                                                                                                                                                        
+         A1. At least two first-degree relatives with HA before 50                                                                                                                  
+         A2. At least one first-degree and two second-degree relatives with HA before 50;                                                                                           
+                                                                                                                                                                                     
+     IF sum1st_ha >= 2 OR /* A1 */                                                                                                                     
+      ( sum1st_ha >= 1 AND sum2nd_ha >= 2 ) /* A2 */                                                                                                                    
+     THEN FCVD = 3; *HIGH RISK;                                                                                                                                                             
+                                                                                                                                                                                     
+   * MODERATE FAMILY HISTORY RISK                                                                                                                                                   
+         B1. Only one first-degree and one second-degree relative with HA before 50                                                                                                 
+         B2. Only one first-degree relative with HA before 50                                                                                                                       
+         B3. Only two second-degree relatives with HA before 50;                                                                                                                     
+                                                                                                                                                                                     
+ 		ELSE IF   ( sum1st_ha = 1 AND sum2nd_ha = 1)/* B1 */                                                                                                                            
+                OR  sum1st_ha = 1  /* B2 */                                                                                            
+                OR  sum2nd_ha >= 2   /* B3 */                                                                                             
+        THEN FCVD = 2; *MODERATE;                                                                                                                                                            
+                                                                                                                                                                                     
+   * AVERAGE FAMILY HISTORY RISK                                                                                                                                                     
+     C1. ONLY ONE second-degree relative                                                                                                                                             
+     C2. ONE or more 3rd-degree or other relative                                                                                                                                   
+     C3. NO RELATIVES OR DISTANT RELATIVE;                                                                                                                                           
+                                                                                                                                                                                     
+ELSE FCVD = 1; *LOW RISK;                                                                                                                                                                            
+END;
+                                                                                                                                                                                   
+/* FH YES/NO DEFINITION */;                                                                                                                                                          
+                                                                                                                                                                             
+FCVDSTRA=.;
+ 	IF FCVD = 1 THEN FCVDSTRA=1; * low risk;                                                                                                                                       
+ 	ELSE IF FCVD IN (2, 3) THEN FCVDSTRA=2; *high risk;
+
+*******************************                                                                                     	                                                                            
+** 9.FAMILY HISTORY DIABETES **
+*******************************;
+*Immediate family;
+FT2D=.;
+ 	IF HAC4A=1 AND HAC5A3=1 THEN FT2D=1; *Yes Mother; 
+ 	ELSE IF HAC4A=1 AND HAC5A4=1 THEN FT2D=1; *Yes Father; 
+ 	ELSE IF HAC4A=1 AND HAC5A5=1 THEN FT2D=1; *Yes Sister; 
+ 	ELSE IF HAC4A=1 AND HAC5A6=1 THEN FT2D=1; *Yes Brother; 
+ 	ELSE IF HAC4A=2 THEN FT2D=0; *No Family History; 
+	ELSE IF HAC4A=8 OR HAC4A=8 THEN FT2D=.; *missing;
+/* too many missing decided not essential */;                                                                                                                                                          
+
+*********************************                                                                                    	                                                                            
+**     10.CANCER (not skin)    **                                                                                                                                        	  
+*********************************;		                                                                                                                                                                   
+/*HAC1O Has a doctor ever told you that you had other cancer (not skin)?
+   780 1 Yes 
+ 19266 2 No
+     1 8 Blank but applicable
+     3 9 Don't know 
+*/                                                        
+CANCER=.; /* 0=No 1=YES from previous variables*/                                                                                     	                                                                
+		IF HAC1O = 2 THEN CANCER=0; * No=0;                                                                                                                                                
+		ELSE IF HAC1O=1 THEN CANCER=1; * Yes=1;     
+		
+*********************************                                                                                    	                                                                            
+**          11.ALCOHOL         **                                                                                                                                        	  
+*********************************;
+/*(# of days drank alcohol in past 12 mos)   ** MYPF3S                                                                                                                                                                 
+/*MAPE1  --> 
+*/   
+ALCOHOL=.; /* 0=No 1=YES from previous variables*/                                                                                     	                                                                
+	IF MAPE1 = 1 THEN ALCOHOL = (MAPE3S*MAPE4)/52.1;                                                                                                                             
+ 		ElSE IF MAPE3S =888 OR MAPE3S =999 OR MAPE4=888 OR MAPE4=999 THEN ALCOHOL = .;
+
+ALCINTAKE=.; * Missing;                                                                                                                                           
+ 	IF MAPE1= 2 OR MAPE1 =8 OR MAPE1 = . OR MAPE3S=. THEN ALCINTAKE=1; * NONE;                                                                                                       
+ 		ELSE IF 0 <= ALCOHOL <3 THEN ALCINTAKE=2; * Less than 3 per week; 
+ 		ELSE IF ALCOHOL >= 3 THEN ALCINTAKE=3; * 3 or more per week;
+
+      
+*********************************                                                                                    	                                                                            
+**     12. DYSLIPIDEMIA        **                                                                                                                                        	  
+*********************************;                                                                                                                                                            
+/* HAE9D HAE7   
+HAE9D To lower your blood cholesterol, are you now following this advice to take prescribed medicine?
+   566 1 Yes
+   221 2 No
+    14 8 Blank but applicable
+     3 9 Don't know
+ 19246 Blank 
+
+HAE7 Have you ever been told by a doctor or other health professional that your blood cholesterol level was high?
+  3243 1 Yes
+  6655 2 No 
+     3 8 Blank but applicable
+    25 9 Don't know
+ 10124 Blank 
+*/   
+nonHDL=TCP-HDP;
+*using NIH EQ for calculating LDL;
+NIHLDL =.;
+if TGP <800 then NIHLDL = (TCP/0.948) - (HDP/0.971) - ((TGP/8.56) + (TGP*nonHDL/2140) - (TGP**2/16100)) - 9.44;
+
+CHOLESTEROL = .; /* 0=NO 1=YES from previous variables*/                                                                                     	                                                                
+	IF HAE7=1 THEN CHOLESTEROL=1; * Yes=1;    
+		ELSE IF HAE7=2 THEN CHOLESTEROL=0; * No=0;
+		ELSE IF HAE7=8 OR HAE7=9 THEN CHOLESTEROL=.; *dont know;
+	IF nonHDL >130 THEN CHOLESTEROL=1; *non-HDL cholesterol 130 (mg/dL) - see AHA's Life's Essentail 8 Updated Definitions, fasting or non-fasting OK;
+		IF nonHDL <=130 THEN CHOLESTEROL=0;
+ELSE IF HAE9D = 1 THEN CHOLESTEROL=1; * Yes=1 */; 
+
+*********************************                                                                                    	                                                                            
+**      13.HYPERTENTION        **                                                                                                                                        	  
+*********************************;   
+/*                                                                                                                                                                                                                                        
+* ASSUME PEPMNK1R=HAZMNK1R AND PEPMNK5R=HAZMNK5R                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+HAE2     Ever told you had high blood pressure                                                                                                                                                                                                                  
+HAZMNK1R SBP average reported to examinee                                                                                                                                                                                                                       
+HAZMNK5R DBP average reported to examinee                                                                                                                                                                                                                       
+HAE4A    Doctor told take prescribed med for HBP                                                                                                                                                                                                               
+*/  
+
+HTN = .;                                                                                                                                                                             
+ 	IF  HAE2 EQ  1 THEN HTN = 1; /* DIAGNOSED */                                                                                                                                                          
+ 		/*ELSE IF  .<HAZMNK5R<90 AND .<HAZMNK1R<140 THEN HTN = 0; /* NORMAL OR PRE-HYPETENSIVE*/                                                                                                                                          
+ 		/*ELSE IF  HAZMNK5R NE  . OR  HAZMNK5R NE . OR HAE4A=1 THEN HTN = 1; /* HYPERTENSIVE */                                                                                                                                                     
+    IF  HTN=. and HAE2 EQ  2 THEN HTN = 0; /* those answered "No" with missing SBP/DBP/Rx as true No */                                                                                                            
+                                                                                                                                                                                                                                                              
+*********************************                                                                                    	                                                                            
+**          14. BMI            **                                                                                                                                        	  
+*********************************;                
+BMI = .; 
+ 	IF BMPBMI < 24.99999 THEN BMI=1; * <25=1; 
+ 		ELSE IF 25=<BMPBMI<29.9999 THEN BMI=2; *25-30=2;
+ 		ELSE IF BMPBMI >=30 THEN BMI=3; *>30=3; 
+
+********************************                                                                                     	                                                                            
+**   15.  MARITAL STATUS      **
+********************************;
+* HFA12; 
+MARSTATUS = .;
+ 	IF HFA12= 1 OR HFA12 =2 OR HFA12 = 3 THEN MARSTATUS=1; *Married; 
+  		ELSE IF HFA12=04 OR HFA12=05 OR HFA12=06  THEN MARSTATUS=2; *Windowed/Divorced/seperated; 
+  		ELSE IF HFA12=07 THEN MARSTATUS=3; *Never married;
+  		ELSE IF HFA12=88 OR HFA12=99 THEN MARSTATUS=.;	
+  		
+******************************                                                                                     	                                                                            
+**  16.  TOTAL CALORIES     **
+******************************;
+*DRPNKCAL; * continiuous;
+
+
+******************************                                                                                     	                                                                            
+**  17.  TOTAL SERVINGS     **
+******************************;
+*total_servings; * continiuous;
+
+******************************                                                                                     	                                                                            
+**  18.  DIET  SODIUM    **
+******************************
+*DRPNSODI; * continious;
+
+
+
+run;
+
+
+
+*MODEL 1:  sex age ethnicity;
+%let cov1 =  HSSEX HSAGEIR DMARETHN;
+
+*MODEL 2: MODEL 1 + smoker, education, poverty-index-ratio, marital status, family hx CVD, 
+			family hx t2d, physical activity, alochol, self-reported cancer (non-skin), 
+			self-reported T2D , self-reported HTN;
+%let cov2 = HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI  ALCINTAKE CANCER T2D HTN;
+
+*MODEL 3: MODEL 2 + total calories and dietary sodium;
+%let cov3 = HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI  ALCINTAKE CANCER T2D HTN
+	DRPNKCAL DRPNSODI;
+
+*confirming what variables have all the missing numbers; 
+PROC SURVEYFREQ data = NHANESIIIanalysisfile; /*variables from table 1*/
+	tables HSSEX DMARETHN EDUCATION SMOKER ALCINTAKE PAACTI PIR
+ 	MARSTATUS FT2D FCVD FCVDSTRA HTN CHOLESTEROL HAE9D HAE7 T2D CANCER BMI HAE7 HAZMNK1R HAZMNK5R GHP nonHDL CRP DRPQ1   ;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+run;
+*DRPQ1 = was this day usual?, 2=yes usual day;
+PROC SURVEYFREQ data = NHANESIIIanalysisfile; /*variables included as covariates checking missingness*/
+tables HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUSFCVD PAACTI  ALCINTAKE CANCER T2D HTN
+	DRPNKCAL DRPNSODI;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+run; 
+DATA  NHANESIIIanalysisfile; * deleting observations that have missing data on covariates; 
+set NHANESIIIanalysisfile;
+
+IF HSSEX=. then delete; 
+IF HSAGEIR=. then delete; 
+IF DMARETHN=. then delete;
+IF SMOKER =. then delete;
+IF EDUCATION=. then delete;
+IF PIR=. then delete; 
+IF MARSTATUS=. then delete;
+IF FCVD=. then delete;
+IF PAACTI=. then delete;
+IF ALCINTAKE=. then delete;
+IF CANCER=. then delete;
+IF T2D=. then delete;
+If HTN=. then delete;
+run;* went from 15318 to 14,835 observations;
+
+DATA  NHANESIIIanalysisfile; *taking month data and covering it to years;
+set NHANESIIIanalysisfile;
+YEAR=permth_int/12;
+run;
+
+/* 
+SDPSTRA6 - total nhanesIII pseudo stratum 
+SDPPSU6 - total nhanesIII pseudo-PSU
+WTPFEX6 - total MEC examined sample final weight
+*/
+*******************************************
+*             CODING EVENTS               *
+*******************************************; 
+
+DATA  NHANESIIIanalysisfile; *coding events after 12 months;
+set NHANESIIIanalysisfile;
+
+CVDEVENT=0;
+	IF ucod_leading IN (1, 5) AND permth_int>12 THEN CVDEVENT=1; *PRIMARY OUTCOME both Disease of heart and cerebrovascular disease;
+
+DOHEVENT=0;
+ 	IF ucod_leading=1 AND permth_int>12 THEN DOHEVENT=1; *just Disease of heart;
+
+STROKEEVENT=0;
+	IF ucod_leading=5 AND permth_int>12 THEN STROKEEVENT=1; *just Cerebrovascular disease;
+
+ALLEVENT=0;
+	IF ucod_leading IN (1,2,3,4,5,6,7,8,9,10)AND permth_int>12 THEN ALLEVENT=1; *allcause morality;
+
+CANCEREVENT=0;
+	IF ucod_leading=2 AND permth_int>12 THEN CANCEREVENT=1; *cancer mortality;
+run;
+
+DATA NHANESIIIanalysisfile; *labeling variables;
+SET NHANESIIIanalysisfile;
+   
+   LABEL PIR = 'Poverty Income Ratio';
+   LABEL MARSTATUS = 'Marital Status';
+   LABEL DMARETHN = 'Ethnicity';
+   LABEL FCVD = 'Family History of early CVD';
+   LABEL PAACTI = 'Physcial Activity';
+   LABEL ALCINTAKE  = 'Alcohol Intake';
+   LABEL CANCER = 'History of Cancer';
+   LABEL CVD = 'History of CVD';
+   LABEL T2D  = 'Self-reported Diabetes';
+   LABEL HTN = 'Self-reported Hypertension';
+   LABEL BMI  = 'Body Mass Index';
+   LABEL CHOLESTEROL  = 'hypercholesterolemia a baseline from dr. and blood sample';
+   LABEL HAE7  = 'self-reported hypercholesterolemia';
+   LABEL HAZMNK1R = 'Systolic BP';
+   LABEL HAZMNK5R = 'Diastolic BP'; 
+   LABEL GHP = 'HbA1c';
+   LABEL nonHDL = 'non-HDL';
+   LABEL CRP = 'CRP';
+   LABEL YEAR = 'Person Years';
+   LABEL total_WHL_oatless = 'Whole grain equivalents';*whole grain variable;
+run;
+
+
+*******************************************
+*          CODING EXPOSURE: PDS           *
+*******************************************; 
+*takings totals and making population-specific quintiles;
+DATA  NHANESIIIanalysisfile;*coding exposure;
+set NHANESIIIanalysisfile;
+PDSN=FFQinform_total_PDS_n;
+PDSP=FFQinform_total_PDS_pp;
+PDSV=FFQinform_total_PDS_v;
+PDSPS=total_PDS_ps;
+PDSM=FFQinform_total_PDS_mufa;
+PDSS=FFQinform_total_PDS_sfc;
+run;
+
+/* making the score with the weights */ 
+
+/* nuts and seeds */
+proc surveymeans data = NHANESIIIanalysisfile percentile = (20 40 60 80);
+	stratum SDPSTRA6;  
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	var PDSN;
+run; /* 20, 40, 60, 80 cutoffs are: 0 0.066204 0.131939 0.431172 servings */
+DATA  NHANESIIIanalysisfile;
+set NHANESIIIanalysisfile;
+QN=.;
+IF PDSN = 0 THEN QN=1;
+ 	ELSE IF 0<PDSN<0.066204 THEN QN=2; 
+ 	ELSE IF 0.066204=<PDSN<0.131939 THEN QN=3;
+ 	ELSE IF 0.131939=<PDSN<0.431172 THEN QN=4; 
+	ELSE IF PDSN >=0.431172 THEN QN=5;
+	run;
+
+/* plant protein */
+proc surveymeans data = NHANESIIIanalysisfile percentile = (20 40 60 80);
+	stratum SDPSTRA6;  
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	var PDSP;
+run; /* 20, 40, 60, 80 cutoffs are: 0.028800 0.097096 0.199353 0.898784 servings */
+DATA  NHANESIIIanalysisfile;
+set NHANESIIIanalysisfile;
+QP=.;
+IF PDSP < 0.028800 THEN QP=1;
+ 	ELSE IF 0.028800=<PDSP<0.097096 THEN QP=2; 
+ 	ELSE IF 0.097096=<PDSP<0.199353 THEN QP=3;
+ 	ELSE IF 0.199353=<PDSP<0.898784 THEN QP=4; 
+	ELSE IF PDSP >=0.898784 THEN QP=5;
+	run;
+
+/* viscous fibre */
+proc surveymeans data = NHANESIIIanalysisfile percentile = (20 40 60 80);
+	stratum SDPSTRA6;  
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	var PDSV;
+run; /* 20, 40, 60, 80 cutoffs are: 0 0.116080 0.366211 0.999165 servings */
+
+DATA  NHANESIIIanalysisfile;
+set NHANESIIIanalysisfile;
+QV=.;
+IF PDSV = 0 THEN QV=1;
+ 	ELSE IF 0<PDSV<0.116080 THEN QV=2; 
+ 	ELSE IF 0.116080=<PDSV<0.366211 THEN QV=3;
+ 	ELSE IF 0.366211=<PDSV<0.999165 THEN QV=4; 
+	ELSE IF PDSV >=0.999165 THEN QV=5;
+run;
+
+/* plantsterol */
+proc surveymeans data = NHANESIIIanalysisfile percentile = (20 40 60 80);
+	stratum SDPSTRA6;  
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	var PDSPS;
+run; /* 20, 40, 60, 80 cutoffs are:  servings */
+DATA  NHANESIIIanalysisfile;
+set NHANESIIIanalysisfile;
+QPS=.;
+IF PDSPS < 149.039596 THEN QPS=1;
+ 	ELSE IF 149.039596=<PDSPS<210.893656 THEN QPS=2; 
+ 	ELSE IF 210.893656=<PDSPS<281.030031THEN QPS=3;
+ 	ELSE IF 281.030031=<PDSPS<387.244358 THEN QPS=4; 
+	ELSE IF PDSPS >=387.244358 THEN QPS=5;
+run;
+
+/* MUFA */ 
+proc surveymeans data = NHANESIIIanalysisfile percentile = (20 40 60 80);
+	stratum SDPSTRA6;  
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	var PDSM;
+run; /* 20, 40, 60, 80 cutoffs are:  servings */
+DATA  NHANESIIIanalysisfile;
+set NHANESIIIanalysisfile;
+QM=.;
+IF PDSM < 0.064789 THEN QM=1;
+ 	ELSE IF 0.064789=<PDSM<0.146918 THEN QM=2; 
+ 	ELSE IF 0.146918=<PDSM<0.232985 THEN QM=3;
+ 	ELSE IF 0.232985=<PDSM<0.498579 THEN QM=4; 
+	ELSE IF PDSM >=0.498579 THEN QM=5;
+run;
+
+/* saturated fat and cholesterol */ 
+proc surveymeans data = NHANESIIIanalysisfile percentile = (20 40 60 80);
+	stratum SDPSTRA6;  
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	var PDSS;
+run; /* 20, 40, 60, 80 cutoffs are: 1.085082 2.259263 3.520310 servings */
+DATA  NHANESIIIanalysisfile;
+set NHANESIIIanalysisfile;
+QS=.;
+IF PDSS <1.077762 THEN QS=1;
+ 	ELSE IF 1.077762=<PDSS<2.249954 THEN QS=2; 
+ 	ELSE IF 2.249954=<PDSS<3.501302 THEN QS=3;
+ 	ELSE IF 3.501302=<PDSS<5.567593 THEN QS=4; 
+	ELSE IF PDSS >=5.567593 THEN QS=5;
+run;
+
+PROC SURVEYFREQ data = NHANESIIIanalysisfile;
+tables QN QP QV QPS QM QS; 
+stratum SDPSTRA6;
+cluster SDPPSU6;
+weight WTPFEX6;
+run;
+
+/* prep for subgroups */
+DATA  NHANESIIIanalysisfile;
+	set NHANESIIIanalysisfile;
+	AGE = .;
+		IF HSAGEIR <60 THEN AGE=1;
+		IF HSAGEIR >=60 THEN AGE=2;
+	EDU = .;
+		IF HFA8R <12 THEN EDU=1;
+		IF HFA8R >=12 THEN EDU=2;
+	BMI2 = .;
+		IF BMPBMI <30 THEN BMI2=1;
+		IF BMPBMI >=30 THEN BMI2=2;
+	ETH_nonwhite = .;
+		IF DMARETHN=1 then ETH_nonwhite=1;
+		IF DMARETHN IN (2,3,4) then ETH_nonwhite=2;
+	ETH_noother = .;
+		IF DMARETHN=1 then ETH_noother=1;
+		IF DMARETHN=2 then ETH_noother=2;
+		IF DMARETHN=3 then ETH_noother=3;
+
+
+	intsex = PDS3*HSSEX;
+	intage = PDS3*AGE;
+	inteth = PDS3*DMARETHN;
+	inteth_nonwhite = PDS3*ETH_nonwhite;
+	inteth_noother = PDS3*ETH_noother;
+	intedu = PDS3*EDU;
+	intsmo = PDS3*SMOKER;
+	intt2d = PDS3*T2D;
+	intbmi2 = PDS3*BMI2;
+	intpir = PDS3*PIR;
+	intcvd = PDS3*CVD;
+	intcan = PDS3*CANCER;
+	intpa = PDS3*ACTCAT;
+	inthtn = PDS3*HTN;
+	intchol = PDS3*HAE7;
+run;
+
+/***********************************************/
+*****           CVD MORTALITY                  *
+/***********************************************/;
+
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 &cov1/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") ALCINTAKE(ref="1")
+	T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 &cov2/rl;
+	lsmeans PDS3 / diff cl;
+run;
+/*MODEL 3: everything and diet */
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") ALCINTAKE(ref="1")
+	T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 &cov3 /rl;
+	test PDS3;
+	lsmeans PDS3 / diff cl;
+run; 
+
+/***********************************************/
+*****      CVD MORTALITY - without CVD          *
+/***********************************************/;
+
+DATA  NHANES_CVD;
+	set u.NHANESIII;
+	if HAF10=1 or HAC1C=1 or HAC1D=1 then delete; *MI, stroke, or congestive heart failure (1,322 observations deleted); 
+	/*if HAC1O=1 then delete; *cancer, not including skin (496 observations deleted); */
+	/*if HAD1=1 then delete; *HAD1=1 self-report Type 2 diabetes*/
+run; * 13869 observations;
+
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data= NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 &cov1/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data=NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1")T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 &cov2/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 3: everything and diet */
+proc surveyphreg data= NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+weight WTPFEX6;
+stratum SDPSTRA6;
+cluster SDPPSU6;
+model permth_int*CVDEVENT(0) = PDS3 &cov3 /rl;
+test PDS3;
+lsmeans PDS3 / diff cl;
+run;
+ ********************************************************;
+/*       JUST those with CVD at baseline - small         */
+  ********************************************************;
+DATA  NHANES_wCVD;
+	set u.NHANESIII;
+	if HAF10=1 or HAC1C=1 or HAC1D=1; *MI, stroke, or congestive heart failure (1,322 observations deleted); 
+	/*if HAC1O=1 then delete; *cancer, not including skin (496 observations deleted); */
+	/*if HAD1=1 then delete; *HAD1=1 self-report Type 2 diabetes*/
+run; * 13869 observations;
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data= NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 &cov1/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+*MODEL 2: everything but diet*/;
+proc surveyphreg data=NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 &cov2/rl;
+	lsmeans PDS3 / diff cl;
+run;
+/*MODEL 3: everything and diet */
+proc surveyphreg data= NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") ALCINTAKE(ref="1")
+	BMI(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 &cov3/rl;
+	test PDS3;
+	lsmeans PDS3 / diff cl;
+run;
+
+*******************************************
+*      CVD Continious     - everyone       *
+*******************************************;
+
+/*MODEL 1, age sex ethnicity, with PDS as continious */
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*CVDEVENT(0) = PDS &cov1/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1")  ALCINTAKE(ref="1") T2D(ref="0")  HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*CVDEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*CVDEVENT(0) = PDS &cov3 /rl;
+run;
+/***********************************************/
+*****      CVD continuous - without CVD          *
+/***********************************************/;
+
+/*MODEL 1, age sex ethnicity, with PDS as continious */
+proc surveyphreg data=NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*CVDEVENT(0) = PDS &cov1/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0")  HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*CVDEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*CVDEVENT(0) = PDS &cov3/rl;
+run;
+
+/***********************************************/
+*****      CVD continuous - with CVD           *
+/***********************************************/;
+/*MODEL 1, age sex ethnicity, with PDS as continious */
+proc surveyphreg data=NHANES_wCVD;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*CVDEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANES_wCVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1")  ALCINTAKE(ref="1") T2D(ref="0")  HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*CVDEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANES_wCVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1")
+	T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*CVDEVENT(0) = PDS &cov3/rl;
+run;
+
+
+
+
+/***********************************************/
+*          DISEASE OF HEART MORTALITY          *
+*       i.e. no cerebrovascular disease        *
+/***********************************************/;
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 &cov1/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 &cov2/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 3: everything and diet */
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 &cov3/rl;
+	test PDS3;
+	lsmeans PDS3 / diff cl;
+run;
+**** WITHOUT CVD at baseline ****; 
+
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data= NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 &cov1/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data=NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1")T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 &cov2/rl;
+	lsmeans PDS3 / diff cl;
+run;
+/*MODEL 3: everything and diet - in those WITHOUT CVD at baseline */
+proc surveyphreg data= NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 &cov3/rl;
+	test PDS3;
+	lsmeans PDS3 / diff cl;
+run;
+
+
+**** WITH CVD at baseline ****; 
+
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data= NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 &cov1/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data=NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1")T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 &cov2/rl;
+	lsmeans PDS3 / diff cl;
+run;
+/*MODEL 3: everything and diet - in those WITHOUT CVD at baseline */
+proc surveyphreg data= NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 &cov3/rl;
+	test PDS3;
+	lsmeans PDS3 / diff cl;
+run;
+
+**Continious analysis **;
+/*MODEL 1, age sex ethnicity, with PDS as continious */
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*DOHEVENT(0) = PDS &cov1/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0")  HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*DOHEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1")PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*DOHEVENT(0) = PDS &cov3/rl;
+run;
+*******************************************
+*  No CVD at baseline: continous analysis *
+*******************************************;
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data=NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*DOHEVENT(0) = PDS &cov1/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*DOHEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*DOHEVENT(0) = PDS &cov3/rl;
+run;
+
+*******************************************
+*   CVD at baseline: continous analysis   *
+*******************************************;
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data=NHANES_wCVD;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*DOHEVENT(0) = PDS &cov1/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANES_wCVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*DOHEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANES_wCVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*DOHEVENT(0) = PDS &cov3/rl;
+run;
+
+
+/***********************************************/
+*           cerebrovascular disease            *
+/***********************************************/;
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 &cov1/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 &cov2/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 3: everything and diet */
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 &cov3/rl;
+	test PDS3;
+	lsmeans PDS3 / diff cl;
+run;
+**** WITHOUT CVD at baseline ****; 
+
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data= NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data=NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") CANCER(ref="1") ALCINTAKE(ref="1")
+ 	T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 &cov2/rl;
+	lsmeans PDS3 / diff cl;
+run;
+/*MODEL 3: everything and diet - in those WITHOUT CVD at baseline */
+proc surveyphreg data= NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 &cov3/rl;
+	test PDS3;
+	lsmeans PDS3 / diff cl;
+run;
+
+
+**** WITH CVD at baseline ****; 
+
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data= NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 &cov1/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data=NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") CANCER(ref="1") ALCINTAKE(ref="1")
+ 	T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 &cov2/rl;
+	lsmeans PDS3 / diff cl;
+run;
+/*MODEL 3: everything and diet - in those WITHOUT CVD at baseline */
+proc surveyphreg data= NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 &cov3/rl;
+	test PDS3;
+	lsmeans PDS3 / diff cl;
+run;
+
+**Continious analysis **;
+/*MODEL 1, age sex ethnicity, with PDS as continious */
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*STROKEEVENT(0) = PDS &cov1/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0")  HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*STROKEEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*STROKEEVENT(0) = PDS &cov3/rl;
+run;
+*******************************************
+*  No CVD at baseline: continous analysis *
+*******************************************;
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data=NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*STROKEEVENT(0) = PDS &cov1/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*STROKEEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*STROKEEVENT(0) = PDS &cov3 /rl;
+run;
+
+*******************************************
+*   CVD at baseline: continous analysis   *
+*******************************************;
+/*MODEL 1, age sex ethnicity */
+proc surveyphreg data=NHANES_wCVD;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*STROKEEVENT(0) = PDS &cov1 /rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANES_wCVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*STROKEEVENT(0) = PDS &cov2 /rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANES_wCVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") CANCER(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*STROKEEVENT(0) = PDS &cov3 /rl;
+run;
+
+
+
+/***********************************************/
+*       ALLCAUSE MORTALITY - on everyone       *
+/***********************************************/;
+/*MODEL 1*/
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3  &cov1 /rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
+	CANCER (ref="0") ALCINTAKE(ref="1")  T2D(ref="0")  HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3  &cov2 /rl;
+	lsmeans PDS3/ diff cl;
+run;
+
+/*MODEL 3: everything*/
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1")  ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 &cov3 /rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/***********************************************/
+*    ALLCAUSE MORTALITY  w/o CVD    
+NHANES_CVD without
+NHANES_wCVD with*
+/***********************************************/;
+/*MODEL 1*/
+proc surveyphreg data= NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0")  HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS  FCVD PAACTI ALCINTAKE T2D HTN /rl;
+	lsmeans PDS3/ diff cl;
+run;
+
+/*MODEL 3: everything*/
+proc surveyphreg data= NHANES_CVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 &cov3/rl;
+	lsmeans PDS3 / diff cl;
+run;
+/*MODEL 1*/
+proc surveyphreg data= NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0")  HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS  FCVD PAACTI ALCINTAKE T2D HTN /rl;
+	lsmeans PDS3/ diff cl;
+run;
+
+/*MODEL 3: everything*/
+proc surveyphreg data= NHANES_wCVD;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 &cov3/rl;
+	lsmeans PDS3 / diff cl;
+run;
+
+
+*******************************************
+*          All-Cause Continious           *
+*******************************************; 
+
+/*MODEL 1, age sex ethnicity, with PDS as continious */
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*ALLEVENT(0) = PDS HSSEX HSAGEIR DMARETHN/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*ALLEVENT(0) = PDS &cov2/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*ALLEVENT(0) = PDS &cov3/rl;
+run;
+
+/*including mediator BMI */
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") T2D (ref="1") ALCINTAKE(ref="1"); *CURRENT=1; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*ALLEVENT(0) = PDS &cov3 BMPBMI/rl;
+run;
+
+
+/*MODEL 1, age sex ethnicity, with PDS as continious */
+proc surveyphreg data=NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*ALLEVENT(0) = PDS HSSEX HSAGEIR DMARETHN/rl;
+run;
+/*MODEL 2: everything but diet*/
+proc surveyphreg data= NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*ALLEVENT(0) = PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN/rl;
+run;
+/*MODEL 3: everything and diet, with PDS as continious */
+proc surveyphreg data=NHANES_CVD;
+	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="0") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	HAZARDRATIO PDS/units=8;
+	model permth_int*ALLEVENT(0) = PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE DRPNKCAL DRPNSODI  T2D HTN/rl;
+run;
+*******************************************
+*            SUBGROUP ANALYSES            *
+*******************************************; 
+
+/* Below will give P for Interaction and SUBGROUPS */
+
+/* First part is creating the interaction variable and then 
+running cox with the interaction variable to get the p for interaction for each subgroup
+Should look like this: var1*var2, var1, var2 plus covariate (i.e. you must ensure both vars are already in the model*/
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop sex;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intsex PDS3 &cov3/rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop age;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intage PDS3 HSSEX AGE DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop ethnicity white vs.nonwhite;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = inteth_nonwhite PDS3 &cov3 /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgroup education;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intedu PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup PIR;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intpir PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup physical actvity ;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intpa PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup smoking;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intsmo PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop T2D;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intt2d PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup BMI2;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intbmi2 PDS3 BMI2 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop HTN;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = inthtn PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop self-reported high cholesterol;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intchol PDS3 &cov3 HAE7/rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup CVD at baseline;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") CVD(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = intcvd PDS3 CVD &cov3 /rl;
+run; *0.98, include this value in the CVD HR table, not subgroup plot;
+* CVD status subgroup for CHD and Stroke;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup CVD at baseline;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") CVD(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intcvd PDS3 CVD &cov3 /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup CVD at baseline;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") CVD(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intcvd PDS3 CVD &cov3 /rl;
+run;
+/* Below is code to get at the difference between SUBGROUPS  
+- use HRs and CIs for forest plots for each subdomain 
+NOTE: you cannot use your short form of the covariate list 
+as each domain needs to be removed from the model inorder to be stratified */
+proc surveyphreg data= NHANESIIIanalysisfile; *Subgroup sex;
+	class PDS3(ref='1')  DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1" )HTN(ref="1");
+	domain HSSEX; *there give two diff outputs, one with sex=1 and another sex=2, use the HR and the CIs;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;  * to understand output see https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.4/statug/statug_surveyphreg_examples03.htm;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup age;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1" ) HTN(ref="1");
+	domain AGE ; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup ethnicity;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain DMARETHN("1", "4"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;  
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup ethnicity white vs. nonwhite;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain ETH_nonwhite;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup education;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+    MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain EDU; * ;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR SMOKER PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup PIR;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain PIR; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION  
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup physical activity, 1=active 2=inactve;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain ACTCAT; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER PIR EDUCATION  
+	MARSTATUS FCVD ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup smoking;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain SMOKER; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup T2D;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") HTN(ref="1");
+	domain T2D; *gives two different outputs, one with out/ one with diabetes;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup BMI2;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain BMI2; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup HTN, 0=no HTN 1=self-reported HTN;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1");
+	domain HTN; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup high cholesterol, 1=Yes, 2= No ;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain HAE7; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+*now try and get numbers and events (DONE IN ABOVE CODE);
+
+*WHAT ABOUT CVD at baseline? Y/N;
+proc surveyphreg data= NHANESIIIanalysisfile;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain CVD; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*CVDEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI HTN /rl;
+run; * gives the two different HRs and CIs;
+
+
+/*MODEL 3: Subgroups for CHD Mortality */
+
+/* Below will give P for Interaction and SUBGROUPS */
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop sex;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intsex PDS3 &cov3/rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop age;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intage PDS3 AGE HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop ethnicity;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = inteth PDS3 &cov3 /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop ethnicity nonwhite;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = inteth_nonwhite PDS3 &cov3 /rl;
+run; 
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgroup education;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intedu PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup PIR;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intpir PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup physical actvity ;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intpa PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup smoking;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intsmo PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop T2D;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intt2d PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup BMI2;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intbmi2 PDS3 BMI2 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop HTN;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = inthtn PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop self-reported high cholesterol;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intchol PDS3 &cov3 HAE7/rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup CVD at baseline;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") CVD(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = intcvd PDS3 CVD &cov3 /rl;
+run; *0.22, include this value in the HR table, not subgroup plot;
+
+/* Below is code to get at the difference between SUBGROUPS  
+- use HRs and CIs for forest plots for each subdomain 
+NOTE: you cannot use your short form of the covariate list 
+as each domain needs to be removed from the model inorder to be stratified */
+
+proc surveyphreg data= NHANESIIIanalysisfile; *Subgroup sex;
+	class PDS3(ref='1')  DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1" )HTN(ref="1");
+	domain HSSEX; *there give two diff outputs, one with sex=1 and another sex=2, use the HR and the CIs;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;  * to understand output see https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.4/statug/statug_surveyphreg_examples03.htm;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup age;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1" ) HTN(ref="1");
+	domain AGE ; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup ethnicity;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain DMARETHN; *there will be four diff outputs;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR  SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup ethnicity;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain eth_nonwhite; *there will be four diff outputs;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR  SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup education;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+    MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain EDU; * ;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR SMOKER PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup PIR;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain PIR; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION  
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup physical activity, 1=active 2=inactve;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain ACTCAT; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER PIR EDUCATION  
+	MARSTATUS FCVD ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup smoking;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain SMOKER; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup T2D;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") HTN(ref="1");
+	domain T2D; *gives two different outputs, one with out/ one with diabetes;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup BMI2;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain BMI2; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup HTN, 0=no HTN 1=self-reported HTN;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1");
+	domain HTN; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup high cholesterol, 1=Yes, 2= No ;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain HAE7; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*DOHEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+
+/*MODEL 3: Subgroups for STROKE EVENT  */
+
+/* Below will give P for Interaction and SUBGROUPS */
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop sex;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intsex PDS3 &cov3/rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop age;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intage PDS3 AGE HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop ethnicity;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = inteth PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop ethnicity nonwhite;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = inteth_nonwhite PDS3 &cov3 /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgroup education;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intedu PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup PIR;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intpir PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup physical actvity ;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intpa PDS3 ACTCAT HSSEX HSAGEIR DMARETHN SMOKER PIR EDUCATION  
+	MARSTATUS FCVD ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup smoking;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intsmo PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop T2D;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intt2d PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup BMI2;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intbmi2 PDS3 BMI2 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop HTN;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = inthtn PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop self-reported high cholesterol;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intchol PDS3 &cov3 HAE7/rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup CVD at baseline;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") CVD(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = intcvd PDS3 CVD &cov3 /rl;
+run; *0.6727, include this value in the CVD HR table, not subgroup plot;
+
+/* Below is code to get at the difference between SUBGROUPS  
+- use HRs and CIs for forest plots for each subdomain  */
+
+proc surveyphreg data= NHANESIIIanalysisfile; *Subgroup sex;
+	class PDS3(ref='1')  DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1" )HTN(ref="1");
+	domain HSSEX; *there give two diff outputs, one with sex=1 and another sex=2, use the HR and the CIs;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;  * to understand output see https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.4/statug/statug_surveyphreg_examples03.htm;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup age;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1" ) HTN(ref="1");
+	domain AGE ; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup ethnicity;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain DMARETHN; *there will be four diff outputs;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR  SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup ethnicity nonwhite;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain eth_nonwhite; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR  SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup education;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+    MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain EDU; * ;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR SMOKER PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup PIR;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain PIR; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION  
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup physical activity, 1=active 2=inactve;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain ACTCAT; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER PIR EDUCATION  
+	MARSTATUS FCVD ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup smoking;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain SMOKER; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup T2D;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") HTN(ref="1");
+	domain T2D; *gives two different outputs, one with out/ one with diabetes;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup BMI2;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain BMI2; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup HTN, 0=no HTN 1=self-reported HTN;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1");
+	domain HTN; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup high cholesterol, 1=Yes, 2= No ;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain HAE7; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*STROKEEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+
+/*MODEL 3: Subgroups for ALL CAUSE  */
+/* Below will give P for Interaction and SUBGROUPS */
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop sex;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intsex PDS3 &cov3/rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop age;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intage PDS3 AGE HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop ethnicity;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = inteth PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; * subgrop ethnicity;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = inteth_nonwhite PDS3 &cov3 /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; * subgroup education;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intedu PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup PIR;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intpir PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup physical actvity ;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intpa PDS3 ACTCAT HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup smoking;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intsmo PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop T2D;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intt2d PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup BMI2;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intbmi2 PDS3 BMI2 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop HTN;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = inthtn PDS3 &cov3 /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;* subgrop self-reported high cholesterol;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1"); 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intchol PDS3 &cov3 HAE7/rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup CVD at baseline;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") CVD(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intcvd PDS3 CVD &cov3 /rl;
+run; *0.68, include this value in the HR table, not subgroup plot;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup cancer at baseline;
+	class PDS3(ref='1') HSSEX(ref="1")  DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") CVD(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = intcan PDS3 CANCER &cov3 /rl;
+run; *0.1420, include this value in the HR table, not subgroup plot;
+
+/* Below is code to get at the difference between SUBGROUPS  
+- use HRs and CIs for forest plots for each subdomain */
+
+proc surveyphreg data= NHANESIIIanalysisfile; *Subgroup sex;
+	class PDS3(ref='1')  DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1" )HTN(ref="1");
+	domain HSSEX; *there give two diff outputs, one with sex=1 and another sex=2, use the HR and the CIs;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;  * to understand output see https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.4/statug/statug_surveyphreg_examples03.htm;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup age;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1" ) HTN(ref="1");
+	domain AGE ; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup ethnicity;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain DMARETHN; *there will be four diff outputs;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR  SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup ethnicity nonwhite;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain eth_nonwhite;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR  SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup education;
+	class PDS3(ref='1') HSSEX(ref="1")  SMOKER(ref="1") 
+    MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain EDU; * ;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR SMOKER PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup PIR;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain PIR; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION  
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup physical activity, 1=active 2=inactve;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain ACTCAT; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER PIR EDUCATION  
+	MARSTATUS FCVD ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup smoking;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1")  FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain SMOKER; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile; *subgroup T2D;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") HTN(ref="1");
+	domain T2D; *gives two different outputs, one with out/ one with diabetes;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI HTN /rl;
+run;
+
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup BMI2;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain BMI2; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup HTN, 0=no HTN 1=self-reported HTN;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1");
+	domain HTN; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D /rl;
+run;
+proc surveyphreg data= NHANESIIIanalysisfile;*subgroup high cholesterol, 1=Yes, 2= No ;
+	class PDS3(ref='1') HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
+	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") 
+	PAACTI(ref="1") ALCINTAKE(ref="1") T2D(ref="1") HTN(ref="1");
+	domain HAE7; 
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	model permth_int*ALLEVENT(0) = PDS3 HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+	MARSTATUS FCVD PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN /rl;
+run;
+/***********************************************/
+*****           FURTHER ANALYSES               *
+/***********************************************/;
+
+
+**** CDC provided this macro - for making graph and doing spline analysis *****
+
+******************************
+*         DIS GRAPH          * 
+******************************; 
+PROC FORMAT ;
+
+VALUE PDSDist   1='<7'
+                2='7-8'
+                3='9-10'
+                4='11-12'
+                5='13-14'
+                6='15-16'
+                7='17-18'
+                8='19-20'
+                9='21-22'
+               10='23-24'
+               11='25-26'
+               12="27-28"
+               13='29-30'
+               
+;
+run;
+
+*part I - getting the PDS distribution info* 
+* creating the PDS predetermined intervals to calculate the percent of population associated with
+each pre-determined intervals;
+
+DATA  NHANESIIIanalysisfile;
+set NHANESIIIanalysisfile;
+	if PDS<7 THEN PDSDist=1;
+	else if 7<=PDS<9 THEN PDSDist=2;
+	else if 9<=PDS<11 THEN PDSDist=3;
+	else if 11<=PDS<13 THEN PDSDist=4;
+	else if 13<=PDS<15 THEN PDSDist=5;
+	else if 15<=PDS<17 THEN PDSDist=6;
+	else if 17<=PDS<19 THEN PDSDist=7;
+	else if 19<=PDS<21 THEN PDSDist=8;
+	else if 21<=PDS<23 THEN PDSDist=9;
+	else if 23<=PDS<25 THEN PDSDist=10;
+	else if 25<=PDS<27 THEN PDSDist=11;
+	else if 27<=PDS<29 THEN PDSDist=12;
+	else if 29<=PDS THEN PDSDist=13;
+run;
+
+
+proc surveyfreq data= NHANESIIIanalysisfile;
+	tables PDSDist /cl nowt;
+	ods output OneWay=RespTable8894;
+	weight WTPFEX6;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	title "PDS distribution for NHANES 1988-1994";
+run;
+*export to excel file for graphng;
+*NHANES 1988-1994;
+proc export data=work.RespTable8894
+outfile="C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\Fig1_dist24JUL2023"
+dbms=EXCEL replace; run;
+*great that works now*;
+
+
+*GRAPH - PDS AND CVD;
+
+libname u "C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\";
+data u.NHANES;
+	set NHANESIIIanalysisfile;
+run;
+*note: choosing a reference number may be important, two options below;
+
+%include "C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\PDS Analysis 2023\RCS_Reg_v1_41betaSurvREG_03262015.sas";
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDS, ref_val= 6 , AVK_msv= 0 , knots_msv= 5 50 95,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 13.9 18.0 22.1,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; *so now go to file named "results" in the folder called "SAS files" 
+- you will get your HR ad 95% CI exported as a table for it; 
+
+
+/* Disease of Heart  */
+
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDS, ref_val= 6 , AVK_msv= 0 , knots_msv= 5 50 95,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= DOHEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS  FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 13.9 18.0 22.1,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+/* Stroke  */
+
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDS, ref_val= 6 , AVK_msv= 0 , knots_msv= 5 50 95,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= STROKEEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 13.9 18.0 22.1,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+*all-cause;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8899,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDS, ref_val= 6, AVK_msv= 0 , knots_msv= 5 50 95,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= ALLEVENT, SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE CVD CANCER T2D HTN,                                                            
+	adjust_var=  PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD PAACTI ALCINTAKE CANCER CVD DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 13.9 18.0 22.1,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+
+*Cancer*;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8899,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDS, ref_val= 6, AVK_msv= 0 , knots_msv=  5 50 95,                                                                                                                           
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CANCEREVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FT2D FCVD PAACTI ALCINTAKE CVD T2D HTN,                                                            
+	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FT2D FCVD 
+				PAACTI ALCINTAKE CVD DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 13.968 18.000447 22.174769,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+
+*CVD - w/o CVD at baseline;
+
+libname u "C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\";
+data u.NHANES_CVD;
+	set NHANESIIIanalysisfile;
+	if HAF10=1 or HAC1C=1 or HAC1D=1 then delete; *MI, stroke, or congestive heart failure;
+run;
+
+%include "C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\PDS Analysis 2023\RCS_Reg_v1_41betaSurvREG_03262015.sas";
+%RCS_SurveyREG(infile=nhanes_CVD, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDS, ref_val= 6 , AVK_msv= 0 , knots_msv= 25 50 75 /* 25 50 75 / 5 50 95 / 20 40 60 80 / 5 25 50 75 95*/,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS  FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 13.968318 18.000447 22.174769,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; *so now go to file named "results" in the folder called "SAS files" 
+- you will get your HR ad 95% CI exported as a table for it; 
+
+/* Disease of Heart  */
+
+%RCS_SurveyREG(infile=nhanes_CVD, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDS, ref_val= 6 , AVK_msv= 0 , knots_msv= 25 50 75 /* 25 50 75 / 5 50 95 / 20 40 60 80 / 5 25 50 75 95*/,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= DOHEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL total_servings DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 13.968318 18.000447 22.174769,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+/* Stroke  */
+
+%RCS_SurveyREG(infile=nhanes_CVD, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDS, ref_val= 6 , AVK_msv= 0 , knots_msv= 25 50 75 /* 25 50 75 / 5 50 95 / 20 40 60 80 / 5 25 50 75 95*/,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= STROKEEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL total_servings DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 13.968318 18.000447 22.174769,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+
+*all-cause  - w/o cancer or CVD at baseline;
+DATA  u.NHANES_AC;
+	set NHANESIIIanalysisfile; 
+	if HAC1O=1 then delete; *cancer, not including skin (496 observations deleted); 
+	if HAF10=1 or HAC1C=1 or HAC1D=1 then delete; 
+run;
+%RCS_SurveyREG(infile=nhanes_AC, outfile= out_8899,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDS, ref_val= 6 /*13.968*/, AVK_msv= 0 , knots_msv= 25 50 75 /* 25 50 75 / 5 50 95 / 20 40 60 80 / 5 25 50 75 95*/,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= ALLEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE CVD CANCER T2D HTN,                                                            
+	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
+				MARSTATUS FCVD PAACTI ALCINTAKE DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 13.968 18.000447 22.174769,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+*******************************
+*          BIOMARKERS         *
+*******************************;
+
+
+*Biomarker linear regression with PDS;
+data NHANESIIIanalysisfile; *new NIH formula for LDL;
+set NHANESIIIanalysisfile;
+NIHLDL =.;
+if TGP <800 then NIHLDL = (TCP/0.948) - (HDP/0.971) - ((TGP/8.56) + (TGP*nonHDL/2140) - (TGP**2/16100)) - 9.44;
+run;
+
+proc univariate data= NHANESIIIanalysisfile normal;
+var CRP TCP TGP HDP nonHDL LCP HAZMNK1R HAZMNK5R GHP BMPBMI NIHLDL; 
+histogram TCP TGP HDP nonHDL CRP LCP HAZMNK1R HAZMNK5R GHP BMPBMI NIHLDL;
+run; /* LCP looks normal, CRP and blood pressure does not*/ /*so normallity test is not looking normal, less than 0.5 */
+* kolmogorov smirnov test for data being normally distributed p=0.01 means its not normal;
+
+
+data NHANESIIIanalysisfile; *fixing the triglyceride variable as NHANES III doesnt consider an triglyceride value that is not fasting; 
+set NHANESIIIanalysisfile; 
+TRI=.;
+IF WTPFHSD6 > 0 THEN TRI=TGP; 
+run;
+
+data NHANESIIIanalysisfile;
+set NHANESIIIanalysisfile; 
+CRPlog = log(CRP);
+SBPlog = log(HAZMNK1R);
+DBPlog = log(HAZMNK5R);
+TGPlog = log(TGP);
+TRIlog = log(TRI);
+run;
+proc univariate data= NHANESIIIanalysisfile normal;
+var CRPlog TCPlog TGPlog HDPlog nonHDLlog GHPlog SBPlog DBPlog BMIlog; 
+histogram CRPlog TCPlog TGPlog HDPlog nonHDLlog GHPlog SBPlog DBPlog BMIlog;
+run;
+
+ods graphics on;
+proc surveyreg data=NHANESIIIanalysisfile plots=all; 
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model CRPlog = PDS ;
+run; *cool graph but doesnt really do much;
+proc surveyreg data=NHANESIIIanalysisfile; 
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model CRPlog = PDS &cov3;
+run;  *only with 11552 obs
+
+/* so I am getting an estimate of 0.0073132, with a p = 0.0010, which isnt really interpretable..
+take the exp(-0.0075936)=0.9924, which means that for every 1 unit increase in PDS 
+the CRP changes by a factor of about 0.99 so its decreasing and if we take *1-0.99 = 0.01 or 1%, 
+we can say its decreasing by 1% source: 
+https://library.virginia.edu/data/articles/interpreting-log-transformations-in-a-linear-model 
+formula to get percent quickly, for 8 point increase in PDS =((1-(exp(-0.0075936)))*100)*8
+Note: if not logged I get a estimate of -0.00437 with a p value of 0.0231*/
+
+*lipid biomarkers linear regression with PDS;
+
+proc surveyreg data=NHANESIIIanalysisfile; *total cholesterol;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model TCP = PDS &cov3;
+run;
+proc surveyreg data=NHANESIIIanalysisfile; 
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model TGP = PDS &cov3;
+run;
+proc surveyreg data=NHANESIIIanalysisfile; *triglycerides;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model TGPlog = PDS &cov3;
+run;
+*non-HDL linear regression with PDS;
+proc surveyreg data=NHANESIIIanalysisfile; *non-HDL;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model nonHDL = PDS &cov3;
+run; * -0.38 (0.15), p = 0.0124;
+
+proc surveyreg data=NHANESIIIanalysisfile; *HDL;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model HDP = PDS &cov3;
+run; *for the HDP its the exact same p value logged and not; 
+proc surveyreg data=NHANESIIIanalysisfile;* HbA1c;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model GHP  = PDS &cov3;
+run;
+
+proc surveyreg data=NHANESIIIanalysisfile; *systolic blood pressure;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model SBPlog  = PDS &cov3;
+run;*-0.0009398, 0.1338; 
+proc surveyreg data=NHANESIIIanalysisfile;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model DBPlog  = PDS &cov3;
+run;
+
+proc surveyreg data=NHANESIIIanalysisfile; *LDL calcuated using the NIH method;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	model NIHLDL = PDS &cov3;
+run;
+
+
+
+***************************************
+* Individual PDS components analysis  *
+***************************************;
+/*need to find cutoffs as the mean of the PDS tertiles is not what I want, sabrina's wild idea, do a dose-response? 
+Will need to find a way to make the knots at the specific values (i.e. the median tertiles)*/
+proc surveymeans data=NHANESIIIanalysisfile; *means for your memory, already done above;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	domain PDS3/diffmeans;
+	var PDS PDSN PDSP PDSV PDSPS PDSM PDSS;
+	run;
+%include "C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\PDS Analysis 2023\RCS_Reg_v1_41betaSurvREG_03262015.sas";
+*nuts*;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSN, ref_val= 0.116718 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSN HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 0.289840 0.610922,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; *so now go to file named "results" in the folder called "SAS files" 
+- you will get your HR ad 95% CI exported as a table for it; 
+
+*plantprotein*;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSP, ref_val= 0.200168 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSP HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 0.453384 1.029918,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+*viscous fibre*;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSV, ref_val= 0.218534 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSV HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 0.500773 1.011699,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+
+*Plantsterol*;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSPS, ref_val= 214.666508 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSPS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 263.316981 339.193621,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+*MUFA foods*;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSM, ref_val= 0.174170  , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 0.299394  0.485963 ,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+*Saturated fat foods*;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSS, ref_val= 4.367697  , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 3.707675  2.930918,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+*nuts - adjusted for all 5 others *;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSN, ref_val= 0.116718 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSN HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSP PDSV PDSPS PDSM PDSS,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 0.289840 0.610922,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; *so now go to file named "results" in the folder called "SAS files" 
+- you will get your HR ad 95% CI exported as a table for it; 
+
+*plantprotein  - adjusted for all 5 others *;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSP, ref_val= 0.200168 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSP HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSV PDSPS PDSM PDSS,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 0.453384 1.029918,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+*viscous fibre  - adjusted for all 5 others *;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSV, ref_val= 0.218534 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSV HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSP PDSPS PDSM PDSS,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 0.500773 1.011699,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+
+*Plantsterol  - adjusted for all 5 others *;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSPS, ref_val= 214.666508 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSPS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSP PDSV PDSM PDSS,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 263.316981 339.193621,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+*MUFA foods  - adjusted for all 5 others *;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSM, ref_val= 0.174170  , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSP PDSV PDSPS PDSS,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 0.299394  0.485963 ,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+*Saturated fat foods  - adjusted for all 5 others *;
+%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
+
+Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
+Main_spline_var= PDSS, ref_val= 4.367697  , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
+Oth_spline_var1=,                                                                                                                          
+TYP_REG=cox,                                                                                                                        
+	dep_var= CVDEVENT, 
+	SURV_TIME_VAR= permth_int, 
+	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
+	adjust_var= PDSS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
+				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSP PDSV PDSPS PDSM,
+Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
+
+DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
+exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
+specif_val= 3.707675  2.930918,                                                                                                      
+wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
+run; 
+
+proc surveymeans data=NHANESIIIanalysisfile; *means for your memory, already done above;
+	stratum SDPSTRA6;
+	cluster SDPPSU6;
+	weight WTPFEX6;
+	domain PDS3/diffmeans;
+	var PDS PDSN PDSP PDSV PDSPS PDSM PDSS;
+
