@@ -1376,6 +1376,7 @@ proc surveyphreg data= NHANES_wCVD;
 run;
 
 **Continious analysis **;
+
 /*MODEL 1, age sex ethnicity, with PDS as continious */
 proc surveyphreg data=NHANESIIIanalysisfile;
 	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
@@ -1385,7 +1386,9 @@ proc surveyphreg data=NHANESIIIanalysisfile;
 	HAZARDRATIO PDS/units=8;
 	model permth_int*STROKEEVENT(0) = PDS &cov1/rl;
 run;
+
 /*MODEL 2: everything but diet*/
+
 proc surveyphreg data= NHANESIIIanalysisfile;
 	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
 	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
@@ -1396,7 +1399,9 @@ proc surveyphreg data= NHANESIIIanalysisfile;
 	HAZARDRATIO PDS/units=8;
 	model permth_int*STROKEEVENT(0) = PDS &cov2/rl;
 run;
+
 /*MODEL 3: everything and diet, with PDS as continious */
+
 proc surveyphreg data=NHANESIIIanalysisfile;
 	class HSSEX(ref="1") DMARETHN(ref="1") SMOKER(ref="1") 
 	EDUCATION(ref="1") MARSTATUS(ref="1") FCVD(ref="1") PAACTI(ref="1") 
@@ -1407,9 +1412,11 @@ proc surveyphreg data=NHANESIIIanalysisfile;
 	HAZARDRATIO PDS/units=8;
 	model permth_int*STROKEEVENT(0) = PDS &cov3/rl;
 run;
+
 *******************************************
 *  No CVD at baseline: continous analysis *
 *******************************************;
+
 /*MODEL 1, age sex ethnicity */
 proc surveyphreg data=NHANES_CVD;
 	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
@@ -1445,6 +1452,7 @@ run;
 *******************************************
 *   CVD at baseline: continous analysis   *
 *******************************************;
+
 /*MODEL 1, age sex ethnicity */
 proc surveyphreg data=NHANES_wCVD;
 	class HSSEX(ref="1") DMARETHN(ref="1"); *1=white;
@@ -1476,8 +1484,6 @@ proc surveyphreg data=NHANES_wCVD;
 	HAZARDRATIO PDS/units=8;
 	model permth_int*STROKEEVENT(0) = PDS &cov3 /rl;
 run;
-
-
 
 /***********************************************/
 *       ALLCAUSE MORTALITY - on everyone       *
@@ -2940,123 +2946,7 @@ wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);
 run; 
 
 
-*Cancer*;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8899,
 
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDS, ref_val= 6, AVK_msv= 0 , knots_msv=  5 50 95,                                                                                                                           
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CANCEREVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FT2D FCVD PAACTI ALCINTAKE CVD T2D HTN,                                                            
-	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FT2D FCVD 
-				PAACTI ALCINTAKE CVD DRPNKCAL DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 13.968 18.000447 22.174769,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-
-*CVD - w/o CVD at baseline;
-
-libname u "C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\";
-data u.NHANES_CVD;
-	set NHANESIIIanalysisfile;
-	if HAF10=1 or HAC1C=1 or HAC1D=1 then delete; *MI, stroke, or congestive heart failure;
-run;
-
-%include "C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\PDS Analysis 2023\RCS_Reg_v1_41betaSurvREG_03262015.sas";
-%RCS_SurveyREG(infile=nhanes_CVD, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDS, ref_val= 6 , AVK_msv= 0 , knots_msv= 25 50 75 /* 25 50 75 / 5 50 95 / 20 40 60 80 / 5 25 50 75 95*/,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS  FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 13.968318 18.000447 22.174769,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; *so now go to file named "results" in the folder called "SAS files" 
-- you will get your HR ad 95% CI exported as a table for it; 
-
-/* Disease of Heart  */
-
-%RCS_SurveyREG(infile=nhanes_CVD, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDS, ref_val= 6 , AVK_msv= 0 , knots_msv= 25 50 75 /* 25 50 75 / 5 50 95 / 20 40 60 80 / 5 25 50 75 95*/,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= DOHEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL total_servings DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 13.968318 18.000447 22.174769,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-/* Stroke  */
-
-%RCS_SurveyREG(infile=nhanes_CVD, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDS, ref_val= 6 , AVK_msv= 0 , knots_msv= 25 50 75 /* 25 50 75 / 5 50 95 / 20 40 60 80 / 5 25 50 75 95*/,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= STROKEEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL total_servings DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 13.968318 18.000447 22.174769,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-
-*all-cause  - w/o cancer or CVD at baseline;
-DATA  u.NHANES_AC;
-	set NHANESIIIanalysisfile; 
-	if HAC1O=1 then delete; *cancer, not including skin (496 observations deleted); 
-	if HAF10=1 or HAC1C=1 or HAC1D=1 then delete; 
-run;
-%RCS_SurveyREG(infile=nhanes_AC, outfile= out_8899,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDS, ref_val= 6 /*13.968*/, AVK_msv= 0 , knots_msv= 25 50 75 /* 25 50 75 / 5 50 95 / 20 40 60 80 / 5 25 50 75 95*/,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= ALLEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE CVD CANCER T2D HTN,                                                            
-	adjust_var= PDS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR 
-				MARSTATUS FCVD PAACTI ALCINTAKE DRPNKCAL DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=6, max_Xaxis=30, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 13.968 18.000447 22.174769,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
 
 *******************************
 *          BIOMARKERS         *
@@ -3180,268 +3070,4 @@ proc surveyreg data=NHANESIIIanalysisfile; *LDL calcuated using the NIH method;
 run;
 
 
-
-***************************************
-* Individual PDS components analysis  *
-***************************************;
-/*need to find cutoffs as the mean of the PDS tertiles is not what I want, sabrina's wild idea, do a dose-response? 
-Will need to find a way to make the knots at the specific values (i.e. the median tertiles)*/
-proc surveymeans data=NHANESIIIanalysisfile; *means for your memory, already done above;
-	stratum SDPSTRA6;
-	cluster SDPPSU6;
-	weight WTPFEX6;
-	domain PDS3/diffmeans;
-	var PDS PDSN PDSP PDSV PDSPS PDSM PDSS;
-	run;
-%include "C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\PDS Analysis 2023\RCS_Reg_v1_41betaSurvREG_03262015.sas";
-*nuts*;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSN, ref_val= 0.116718 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSN HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 0.289840 0.610922,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; *so now go to file named "results" in the folder called "SAS files" 
-- you will get your HR ad 95% CI exported as a table for it; 
-
-*plantprotein*;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSP, ref_val= 0.200168 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSP HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 0.453384 1.029918,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-*viscous fibre*;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSV, ref_val= 0.218534 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSV HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 0.500773 1.011699,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-
-*Plantsterol*;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSPS, ref_val= 214.666508 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSPS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 263.316981 339.193621,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-*MUFA foods*;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSM, ref_val= 0.174170  , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 0.299394  0.485963 ,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-*Saturated fat foods*;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSS, ref_val= 4.367697  , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 3.707675  2.930918,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-*nuts - adjusted for all 5 others *;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSN, ref_val= 0.116718 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSN HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSP PDSV PDSPS PDSM PDSS,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 0.289840 0.610922,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; *so now go to file named "results" in the folder called "SAS files" 
-- you will get your HR ad 95% CI exported as a table for it; 
-
-*plantprotein  - adjusted for all 5 others *;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSP, ref_val= 0.200168 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSP HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSV PDSPS PDSM PDSS,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 0.453384 1.029918,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-*viscous fibre  - adjusted for all 5 others *;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSV, ref_val= 0.218534 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSV HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSP PDSPS PDSM PDSS,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 0.500773 1.011699,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-
-*Plantsterol  - adjusted for all 5 others *;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSPS, ref_val= 214.666508 , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSPS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSP PDSV PDSM PDSS,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 263.316981 339.193621,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-*MUFA foods  - adjusted for all 5 others *;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSM, ref_val= 0.174170  , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSP PDSV PDSPS PDSS,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 0.299394  0.485963 ,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-*Saturated fat foods  - adjusted for all 5 others *;
-%RCS_SurveyREG(infile=nhanes, outfile= out_8894,
-
-Dir_data= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files, adjust=Full, year=0718,                                      
-Main_spline_var= PDSS, ref_val= 4.367697  , AVK_msv= 0 , knots_msv= 20 40 60 80,                                                                                                                            
-Oth_spline_var1=,                                                                                                                          
-TYP_REG=cox,                                                                                                                        
-	dep_var= CVDEVENT, 
-	SURV_TIME_VAR= permth_int, 
-	Class_var= HSSEX DMARETHN SMOKER EDUCATION MARSTATUS FCVD PAACTI ALCINTAKE T2D HTN,                                                            
-	adjust_var= PDSS HSSEX HSAGEIR DMARETHN SMOKER EDUCATION PIR MARSTATUS FCVD 
-				PAACTI ALCINTAKE CANCER DRPNKCAL DRPNSODI T2D HTN PDSN PDSP PDSV PDSPS PDSM,
-Y_ref_line= 1, min_Xaxis=0, max_Xaxis=6, NO_DELETE_FILES=1, EXPORT_CURVES=1,                                                                           
-
-DIR_EXPORT_CURVES= C:\Users\Meg\OneDrive - University of Toronto\NHANES\SAS files\results,                                                      
-exp_beta= 1, round= 0.001,HISTOGRAM=1,                                                                                                      
-specif_val= 3.707675  2.930918,                                                                                                      
-wgt=WTPFEX6, strata=SDPSTRA6, psu=SDPPSU6);                                                         
-run; 
-
-proc surveymeans data=NHANESIIIanalysisfile; *means for your memory, already done above;
-	stratum SDPSTRA6;
-	cluster SDPPSU6;
-	weight WTPFEX6;
-	domain PDS3/diffmeans;
-	var PDS PDSN PDSP PDSV PDSPS PDSM PDSS;
 
