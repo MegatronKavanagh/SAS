@@ -320,10 +320,10 @@ NOTE: did not take plasma glucose as not all were fasting (only subset of 7,385 
  		ELSE T2D=.;                                                                                                                                             
 */
 
-/*simple T2D*/ 
+/*simple self-reported T2D*/ 
 
  	IF HAD1=2 THEN T2D=0;*Diabetes = no; 
- 		ELSE IF HAD1=1 THEN T2D=1; *Diagnosed or A1c: Diabetes = yes;                                                                                                                                                                                        
+ 		ELSE IF HAD1=1 THEN T2D=1; *Diagnosed Diabetes = yes;                                                                                                                                                                                        
  		ELSE T2D=.;   *Response "don't know" was categorized as missing;                                                                                                                                            
 
 
@@ -424,7 +424,7 @@ FT2D=.;
  	ELSE IF HAC4A=1 AND HAC5A6=1 THEN FT2D=1; *Yes Brother; 
  	ELSE IF HAC4A=2 THEN FT2D=0; *No Family History; 
 	ELSE IF HAC4A=8 OR HAC4A=8 THEN FT2D=.; *missing;
-/* too many missing decided not essential */;                                                                                                                                                          
+/* too many missing decided not essential covar */;                                                                                                                                                          
 
 *********************************                                                                                    	                                                                            
 **     10.CANCER (not skin)    **                                                                                                                                        	  
